@@ -1,39 +1,45 @@
-// memory allocator with fixed chunks sizes
+// memory allocator with dynamic sizes (from 0x20 to 0x100)
 
 #ifndef MMALLOC_H
 #define MMALLOC_H 1
 
 #include <stdlib.h>
-#include <stdint.h>
 #include <sys/mman.h>
-#include <stdio.h>
+#include <stdint.h>
 
-#define CHUNK_SIZE 0x40
 #define HEAP_START (void*)0x100000
 
-// start of memory for the allocator
+
 void* memstart = NULL;
 size_t memsize = 0x0;
-
-// end of used region in the mmaped memory
 void* memused = NULL;
+
 
 
 struct freelist_t {
     struct freelist_t* next;
 };
-struct freelist_t* freelist = NULL;
-size_t freed_chunks = 0x0;
+
+struct bin_t {
+    size_t freed;
+    struct freelist_t* freelist;
+};
 
 
-void *mmalloc(size_t size) {
-    // return value;
+// from 0x20 to 0x100
+struct bin_t bins[15];
+
+
+
+void* mmalloc(size_t size) {
     void* p;
 
-    if (size != CHUNK_SIZE) {
+    if (size > 0x100) {
         return (void*)-1;
     }
-
+    size = (size + 0xf) & (~0xfUL);
+    if (size < 0x20)
+        size = 0x20;
 
     if (memstart == NULL) {
         memstart = mmap(HEAP_START, 0x1000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0x0);
@@ -44,11 +50,15 @@ void *mmalloc(size_t size) {
         memsize = 0x1000;
         memused = memstart;
     }
-
-    if (freed_chunks == 0) {
-        // make a new chunk
-        if (memused + CHUNK_SIZE > memstart + memsize) {
-            // we need to mmap more memory
+    size_t idx = (size / 0x10) - 2;
+    if (bins[idx].freed > 0) {
+        // get from freelist
+        p = bins[idx].freelist;
+        bins[idx].freelist = bins[idx].freelist->next;
+        bins[idx].freed--;
+    } else {
+        // make new chunk
+        if (memused + size + 0x8 > memstart + size) {
             void* mem = mmap(memstart + memsize, 0x1000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0x0);
             if (mem == (void*)-1) {
                 fputs("mmap: an error happened", stderr);
@@ -57,24 +67,23 @@ void *mmalloc(size_t size) {
             memsize = memsize + 0x1000;
         }
         p = memused;
-        memused = memused + CHUNK_SIZE;
-
-    } else if (freed_chunks > 0) {
-        p = freelist;
-        freelist = freelist->next;
-        freed_chunks--;
+        *(size_t*)p = size;
+        p = memused + 8;
+        memused = memused + size + 8;
     }
     return p;
 }
 
 void mfree(void* ptr) {
-    if (ptr == NULL) {
+    if (ptr == NULL)
         return;
-    }
-    struct freelist_t* head = (struct freelist_t*)ptr;
-    head->next = freelist;
-    freelist = head;
-    freed_chunks++;
+    size_t size = *(size_t*)(ptr - 8);
+    size_t idx = (size / 0x10) - 2; 
+
+    struct freelist_t* head = ptr;
+    head->next = bins[idx].freelist;
+    bins[idx].freelist = head;
+    bins[idx].freed++;
 }
 
 

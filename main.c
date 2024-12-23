@@ -1,12 +1,16 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include "mmalloc-fixed.h"
+#include "mmalloc.h"
 #include <string.h>
 
 
 int main () {
-    for (int i =0 ; i < 100;i++ ) {
-        mmalloc(CHUNK_SIZE);
-    }
+    char* a  = mmalloc(0x20);
+    strcpy(a, "this is cool");
+    char* b = mmalloc(0x100);
+    strcpy(b, "skaldhkasjdlkdjslkasdj");
+
+    mfree(a);
+    mfree(b);
 }
 
